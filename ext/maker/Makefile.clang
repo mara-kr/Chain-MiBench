@@ -1,0 +1,138 @@
+TOOLCHAIN = clang
+
+include $(MAKER_ROOT)/Makefile.env
+include $(MAKER_ROOT)/Makefile.board
+
+LINKER_SCRIPTS_ROOT = $(MAKER_ROOT)/linker-scripts
+
+PREFIX = $(CLANG_ROOT)/bin/
+CC      = $(PREFIX)clang
+export LLC     = $(PREFIX)llc
+export LLVM_LINK= $(PREFIX)/llvm-link
+export LLVM_AS = $(PREFIX)/llvm-as
+export LLVM_DIS = $(PREFIX)/llvm-dis
+export OPT      = $(PREFIX)/opt
+
+GCC     = $(TOOLCHAIN_ROOT)/bin/msp430-elf-gcc
+AS      = $(TOOLCHAIN_ROOT)/bin/msp430-elf-as
+#LD      = $(TOOLCHAIN_ROOT)/bin/msp430-elf-ld
+LD      = $(GCC)
+GDB     = $(TOOLCHAIN_ROOT)/bin/msp430-elf-gdb
+
+LIB_SUFFIX = a.bc
+EXEC_SUFFIX = out
+include $(MAKER_ROOT)/Makefile.suffix
+
+HWMULT ?= 1
+
+# We override because when this file is included from a nested build directory
+# (say, when the app or toolchain has more than one build artifact, each built
+# by its own makefile), the CFLAGS are passed via '$(MAKE) -e', with which
+# changing the value of a variable is only possible with override. It's ugly,
+# but hopefully, this is enough to make things work.
+
+override CFLAGS += \
+	--target=msp430 \
+	-D$(DEVICEDEF) \
+	-nobuiltininc \
+	-nostdinc++ \
+	-isysroot /none \
+	-O0 \
+	-g \
+	-std=c99 \
+	-Wall \
+	-MD \
+	-I $(TOOLCHAIN_ROOT)/lib/gcc/msp430-elf/4.9.1/include \
+	-I $(TOOLCHAIN_ROOT)/msp430-elf/include \
+	-I $(TOOLCHAIN_ROOT)/include \
+	-I $(SRC_ROOT) \
+
+override LLC_FLAGS += \
+	-O0 \
+
+ifneq ($(HWMULT),1)
+override LLC_FLAGS += -msp430-hwmult-mode=no
+endif
+
+override LFLAGS += \
+	-Wl,-Map=$(BIN).map \
+	-T $(LINKER_SCRIPTS_ROOT)/$(DEVICE).ld \
+	-L $(TOOLCHAIN_ROOT)/include \
+
+# By default, link sources (given as object files), compiled bytecode
+LINK_OBJECTS ?= $(OBJECTS:.o=.bc)
+
+VPATH = $(SRC_ROOT)
+
+all: $(BIN)
+
+-include $(OBJECTS:.o=.d)
+
+# disable implicit rule that for some reason overrides the chained rules below
+.SUFFIXES:
+
+# LLVM/Clang compiler and linker part of the pipeline
+
+%.bc: %.c
+	mkdir -p "./$(shell dirname $@)"
+	$(CC) -emit-llvm -c $(CFLAGS) $< -o $@
+
+%.a.bc: $(LINK_OBJECTS)
+	$(LLVM_LINK) -o $@ $^ $(LLVM_LIBS)
+
+# Disassemble IR bytecode (this is auxiliary, not part of the build pipeline)
+%.ll : %.bc
+	$(LLVM_DIS) -o $@ $^
+
+# Produce C++ code for constructing the given IR (aux target)
+%.ir : %.bc
+	$(LLC) -march=cpp -o $@ $^
+
+# Compile LLVM IR into LLVM bytecode (aux target)
+%.ll.bc: %.ll
+	$(LLVM_AS) -o $@ $^
+
+# View the CFG graph in a .dot program (via xdg-open)
+%.bc.cfg: %.bc
+	$(OPT) -view-cfg $<
+
+# LLVM bytecode to native assembly
+
+%.s: %.bc
+	$(LLC) $(LLC_FLAGS) $^ -o $@
+
+%.S: %.a.bc
+	$(LLC) $(LLC_FLAGS) $^ -o $@
+
+# Native assembly to native object code
+
+%.out: %.S
+	$(GCC) $(LFLAGS) -o $@ $< $(LIBS)
+
+# Do not remove these intermediates
+.PRECIOUS: %.a.bc %.bc %.s %.S
+
+clean:
+	rm -f *.o *.bc *.asm *.s *.S *.map *.out *.a *.d *.ll
+
+debug: $(BIN)
+	$(GDB) $(BIN)
+
+# disable implicit rules, for personal sanity
+.SUFFIXES:
+
+ifeq ($(TARGET_TYPE),exec)
+include $(MAKER_ROOT)/Makefile.program
+endif
+
+ifeq ($(TARGET_TYPE),exec)
+define add-lib
+LLVM_LIBS += $$(DEP_LIB_DIR_$(1))/$(1).$(LIB_SUFFIX)
+endef
+else # TARGET_TYPE
+define add-lib
+# nothing
+endef
+endif
+
+include $(MAKER_ROOT)/Makefile.dep

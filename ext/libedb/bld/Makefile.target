@@ -1,0 +1,40 @@
+CONFIG_EDB ?= 0
+
+ifeq ($(CONFIG_EDB),1)
+override CFLAGS += -DCONFIG_EDB
+
+# Can't use DEPS facility for these because the toolchain has to be GCC
+ifeq ($(TOOLCHAIN),gcc)
+override DEPS += libedb libwispbase
+else # TOOLCHAIN != gcc
+
+# libedb is special because it has to be compiled by GCC, not Clang,
+# even if the app is built with Clang
+override CFLAGS += -I$(LIB_ROOT)/libedb/src/include
+override LFLAGS += -L$(LIB_ROOT)/libedb/bld/gcc
+override LIBS += -ledb
+
+# libwispbase is special because it has to be compiled by GCC, not Clang,
+# even if the app is built with Clang
+override CFLAGS += -I$(LIB_ROOT)/libwispbase/src/include
+override LFLAGS += -L$(LIB_ROOT)/libwispbase/bld/gcc
+override LIBS += -lwispbase
+
+# libmspbuiltins is for clang only, but compiled by gcc
+override CFLAGS += -I$(LIB_ROOT)/libmspbuiltins/src/include
+override LFLAGS += -L$(LIB_ROOT)/libmspbuiltins/bld/gcc
+override LIBS += -lmspbuiltins
+
+endif # TOOLCHAIN != gcc
+
+THIS_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+include $(THIS_DIR)/Makefile.config
+
+# Needed for building this library from a nested makefile
+export CFLAGS
+#export LFLAGS # TODO: why does this utterly break the build?
+			   # NOTE: we don't need this for TOOLCHAIN=gcc
+export LIBS
+export DEPS
+
+endif # CONFIG_EDB

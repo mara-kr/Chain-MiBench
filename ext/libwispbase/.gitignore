@@ -1,0 +1,5 @@
+*~	# backup/temp files/folders
+.dvt/ 	# TI EnergyTrace folders
+
+.*.swp
+.*.swo

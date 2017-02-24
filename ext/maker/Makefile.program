@@ -1,0 +1,28 @@
+include $(MAKER_ROOT)/Makefile.env
+
+VOLTAGE = 3300
+DEVICE_IDX ?= 0
+
+FET_DEVICE = /dev/ttyACM$(DEVICE_IDX)
+
+ARGS = \
+	-v $(VOLTAGE) \
+	-d $(FET_DEVICE) \
+
+ifneq ($(LIBMSP430_ROOT),)
+export LD_LIBRARY_PATH := $(LIBMSP430_ROOT)
+endif
+
+power:
+	mspdebug $(ARGS) tilib "exit"
+
+prog: $(EXEC).prog
+
+define prog
+	mspdebug $(ARGS) tilib "prog $1"
+endef
+
+export prog
+
+%.prog: %.out
+	$(call prog,$<)

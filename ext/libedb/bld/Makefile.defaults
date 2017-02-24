@@ -1,0 +1,11 @@
+# Default values for config flags declared in Makefile.config
+# The config flags are designed to be overriden from the app
+# makefile, not editted here. This is not meant to be a reference
+# of available config option, Makefile.config is the reference
+# with comments. Also, flags whose default value is 'unset' do not need to be
+# explicitly listed here.
+
+CONFIG_ENABLE_WATCHPOINTS ?= 1
+CONFIG_ENABLE_TARGET_SIDE_DEBUG_MODE ?= 1
+CONFIG_PASSIVE_BREAKPOINT_IMPL ?= c
+CONFIG_PULL_DOWN_ON_CODEPOINT_LINES ?= 0
