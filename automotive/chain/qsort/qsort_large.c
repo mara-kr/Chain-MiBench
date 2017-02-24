@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <math.h>
+#include <stdlib.h>
 
 #include <libio/log.h>
 #include <libchain/chain.h>
@@ -9,6 +10,7 @@
 #endif
 
 #define UNLIMIT
+#define SEED 2 // No guarentuee of on-board timer
 #define MAXARRAY 4096 /* too large causes segfault (orig == 60000)*/
 #define STACK_SIZE 32 // 2*ceil(log2(MAXARRAY)), upto next power 2
 
@@ -49,9 +51,10 @@ static unsigned partition(vertex_t *a, unsigned low_idx, unsigned hi_idx) {
     return i;
 }
 
-TASK(1, task_init)
-TASK(2, task_sort)
-TASK(3, task_end)
+TASK(1, pre_init)
+TASK(2, task_init)
+TASK(3, task_sort)
+TASK(4, task_end)
 
 // The stack contains subarrays to be processed (i.e. a call stack)
 struct sort_params {
@@ -66,24 +69,66 @@ struct sort_params {
     SELF_FIELD_INITIALIZER\
 }
 
+struct init_i {
+    SELF_CHAN_FIELD(unsigned, i);
+};
 
+#define FIELD_INIT_init_i {\
+    SELF_FIELD_INITIALIZER\
+}
+
+// Add array field
+struct end_i {
+    SELF_CHAN_FIELD(unsigned, i);
+    CHAN_FIELD_ARRAY(vertex_t, vals, MAXARRAY);
+};
+
+#define FIELD_INIT_end_i {\
+    SELF_FIELD_INITIALIZER\
+}
+
+CHANNEL(pre_init, task_init, init_i);
 CHANNEL(task_init, task_sort, sort_params);
+CHANNEL(task_sort, task_end, end_i);
 SELF_CHANNEL(task_sort, sort_params);
+SELF_CHANNEL(task_init, init_i);
+SELF_CHANNEL(task_end, end_i);
 
 
 // always run on reboot
 void init() {
+    srand(SEED);
+}
+
+void pre_init() {
+    unsigned i = 0;
+    CHAN_OUT1(unsigned, i, i, CH(pre_init, task_init));
+    TRANSITION_TO(task_init);
 }
 
 // Assemble array, transition to task_sort
 void task_init() {
     task_prologue();
     LOG("init\r\n");
-    // Set stack idx to -1
+    unsigned i;
+    i = *CHAN_IN2(unsigned, i, SELF_IN_CH(task_init),
+            CH(pre_init, task_init));
+
+    vertex_t vals[MAXARRAY];
+    for ( ; i < MAXARRAY; i++) {
+        vals[i].distance = (double) rand();
+        vals[i].x = rand();
+        vals[i].y = rand();
+        vals[i].z = rand();
+        CHAN_OUT1(unsigned, i, i, SELF_OUT_CH(task_init));
+    }
+
+    // Set stack idx to 0xFFFF - need a default value
     unsigned stack_i = (unsigned) -1;
     CHAN_OUT1(unsigned, stack_idx, stack_i,
             CH(task_init, task_sort));
-
+    CHAN_OUT1(vertex_t *, vals, vals,
+            CH(task_init, task_sort));
     TRANSITION_TO(task_sort);
 }
 
@@ -105,25 +150,38 @@ void task_sort() {
         if (stack_val.lo < stack_val.hi) {
             i = partition(vals, stack_val.lo, stack_val.hi);
             stack[stack_i] = (stack_val_t) {.lo = stack_val.lo, .hi = i-1};
+            CHAN_OUT1(stack_val_t, stack[stack_i], stack[stack_i],
+                    SELF_OUT_CH(task_sort));
             stack_i++;
             stack[stack_i] = (stack_val_t) {.lo = i, .hi = stack_val.hi};
-            // Push vals first so that the partition persists. If this
-            // fails, we repeat the work that was on the stack.
-            // TODO problem with pushing stack next - we popped
-            // a value off the stack and overwrote the location.
-            // Maybe need a "done" flag on stack values?
-            CHAN_OUT1(vertex_t *, vals, vals,
+            CHAN_OUT1(stack_val_t, stack[stack_i], stack[stack_i],
                     SELF_OUT_CH(task_sort));
-            CHAN_OUT1(stack_val_t *, stack, stack,
+
+            CHAN_OUT1(vertex_t *, vals, vals,
                     SELF_OUT_CH(task_sort));
             CHAN_OUT1(unsigned, stack_idx, stack_i,
                     SELF_OUT_CH(task_sort));
             TRANSITION_TO(task_sort);
         }
+    } else {
+        unsigned int end_i = 0;
+        CHAN_OUT1(unsigned, i, i, CH(task_sort, task_end));
+        TRANSITION_TO(task_end);
     }
 }
 
 void task_end() {
     task_prologue();
 
+    unsigned i = *CHAN_IN2(unsigned, i, SELF_IN_CH(task_end),
+            CH(task_sort, task_end));
+    vertex_t *vals = *CHAN_IN2(vertex_t *, vals, SELF_IN_CH(task_end),
+            CH(task_sort, task_end));
+
+    for ( ; i < MAXARRAY-1; i++) {
+        CHAN_OUT1(unsigned, i, i, SELF_OUT_CH(task_end));
+        if (compare(vals[i+1],vals[i]) < 0) {
+            // Some failure condition
+        }
+    }
 }
