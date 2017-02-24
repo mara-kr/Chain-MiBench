@@ -11,8 +11,8 @@
 
 #define UNLIMIT
 #define SEED 2 // No guarentuee of on-board timer
-#define MAXARRAY 4096 /* too large causes segfault (orig == 60000)*/
-#define STACK_SIZE 32 // 2*ceil(log2(MAXARRAY)), upto next power 2
+#define MAXARRAY 256 /* too large causes segfault (orig == 60000)*/
+#define STACK_SIZE 16 // 2*ceil(log2(MAXARRAY)), upto next power 2
 
 
 typedef struct my3DVertexStruct {
@@ -165,7 +165,7 @@ void task_sort() {
         }
     } else {
         unsigned int end_i = 0;
-        CHAN_OUT1(unsigned, i, i, CH(task_sort, task_end));
+        CHAN_OUT1(unsigned, i, end_i, CH(task_sort, task_end));
         TRANSITION_TO(task_end);
     }
 }
@@ -185,3 +185,6 @@ void task_end() {
         }
     }
 }
+
+ENTRY_TASK(pre_init)
+INIT_FUNC(init)
