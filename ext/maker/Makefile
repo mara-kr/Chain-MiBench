@@ -1,7 +1,7 @@
 BLD_REL_ROOT = bld
 EXT_REL_ROOT = ext
 
-export SRC_ROOT = $(abspath src)
+export SRC_ROOT ?= $(abspath src)
 export LIB_ROOT = $(abspath $(EXT_REL_ROOT))
 export MAKER_ROOT = $(abspath $(EXT_REL_ROOT)/maker)
 

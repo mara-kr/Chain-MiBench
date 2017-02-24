@@ -31,3 +31,11 @@
 # Debug files
 *.dSYM/
 *.su
+
+# Binaries and intermediates produces by bld/gcc/all
+blinker.out
+main.d
+
+# Text editor swap files
+*~
+*.swp
