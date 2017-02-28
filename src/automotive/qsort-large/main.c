@@ -1,15 +1,22 @@
+#include <msp430.h>
 #include <stdio.h>
 #include <math.h>
 #include <stdlib.h>
 
+#include <libwispbase/wisp-base.h>
 #include <libio/log.h>
 #include <libchain/chain.h>
 
 #ifdef CONFIG_LIBEDB_PRINTF
-#include <libedb.edb.h>
+#include <libedb/edb.h>
 #endif
 
+#include "pin_assign.h"
+
 #define UNLIMIT
+
+#define WAIT_TICK_DURATION_ITERS 300000
+
 #define SEED 2 // No guarentuee of on-board timer
 #define MAXARRAY 256 // Any larger won't fit on msp430
 #define STACK_SIZE 32 // 2*ceil(log2(MAXARRAY)), upto next power 2
@@ -55,6 +62,8 @@ TASK(1, pre_init)
 TASK(2, task_init)
 TASK(3, task_sort)
 TASK(4, task_end)
+TASK(5, task_fail)
+TASK(6, task_success)
 
 // The stack contains subarrays to be processed (i.e. a call stack)
 struct sort_params {
@@ -96,10 +105,27 @@ SELF_CHANNEL(task_sort, sort_params);
 SELF_CHANNEL(task_init, init_i);
 SELF_CHANNEL(task_end, end_vals);
 
+volatile unsigned work_x;
+
+static void burn(uint32_t iters) {
+    uint32_t iter = iters;
+    while (iter--)
+        work_x++;
+}
 
 // always run on reboot
 void init() {
     srand(SEED);
+    /* Turn on LEDS */
+    GPIO(PORT_LED_1, DIR) |= BIT(PIN_LED_1);
+    GPIO(PORT_LED_2, DIR) |= BIT(PIN_LED_2);
+#if defined(PORT_LED_3)
+    GPIO(PORT_LED_3, DIR) |= BIT(PIN_LED_3);
+#endif
+    // Turn on LED1 until we (maybe) fail
+    GPIO(PORT_LED_1, OUT) |= BIT(PIN_LED_1);
+
+    INIT_CONSOLE();
 }
 
 void pre_init() {
@@ -112,6 +138,8 @@ void pre_init() {
 void task_init() {
     task_prologue();
     LOG("init\r\n");
+    GPIO(PORT_LED_1, OUT) |= BIT(PIN_LED_1);
+
     unsigned i;
     i = *CHAN_IN2(unsigned, i, SELF_IN_CH(task_init),
             CH(pre_init, task_init));
@@ -180,9 +208,26 @@ void task_end() {
     for ( ; i < MAXARRAY-1; i++) {
         CHAN_OUT1(unsigned, i, i, SELF_OUT_CH(task_end));
         if (compare(vals[i+1],vals[i]) < 0) {
-            // Some failure condition
+            TRANSITION_TO(task_fail);
         }
     }
+    TRANSITION_TO(task_success);
+}
+
+// Blink LED1 on failure
+void task_fail() {
+    GPIO(PORT_LED_1, OUT) |= BIT(PIN_LED_1);
+    burn(WAIT_TICK_DURATION_ITERS);
+    GPIO(PORT_LED_1, OUT) &= ~BIT(PIN_LED_1);
+    burn(WAIT_TICK_DURATION_ITERS);
+}
+
+// Blink LED2 on success
+void task_success() {
+    GPIO(PORT_LED_2, OUT) |= BIT(PIN_LED_2);
+    burn(WAIT_TICK_DURATION_ITERS);
+    GPIO(PORT_LED_2, OUT) &= ~BIT(PIN_LED_2);
+    burn(WAIT_TICK_DURATION_ITERS);
 }
 
 ENTRY_TASK(pre_init)
