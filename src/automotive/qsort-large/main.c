@@ -62,8 +62,8 @@ TASK(1, pre_init)
 TASK(2, task_init)
 TASK(3, task_sort)
 TASK(4, task_end)
-TASK(5, task_fail)
-TASK(6, task_success)
+TASK(5, bench_fail)
+TASK(6, bench_success)
 
 // The stack contains subarrays to be processed (i.e. a call stack)
 struct sort_params {
@@ -208,14 +208,14 @@ void task_end() {
     for ( ; i < MAXARRAY-1; i++) {
         CHAN_OUT1(unsigned, i, i, SELF_OUT_CH(task_end));
         if (compare(vals[i+1],vals[i]) < 0) {
-            TRANSITION_TO(task_fail);
+            TRANSITION_TO(bench_fail);
         }
     }
-    TRANSITION_TO(task_success);
+    TRANSITION_TO(bench_success);
 }
 
 // Blink LED1 on failure
-void task_fail() {
+void bench_fail() {
     GPIO(PORT_LED_1, OUT) |= BIT(PIN_LED_1);
     burn(WAIT_TICK_DURATION_ITERS);
     GPIO(PORT_LED_1, OUT) &= ~BIT(PIN_LED_1);
@@ -223,7 +223,7 @@ void task_fail() {
 }
 
 // Blink LED2 on success
-void task_success() {
+void bench_success() {
     GPIO(PORT_LED_2, OUT) |= BIT(PIN_LED_2);
     burn(WAIT_TICK_DURATION_ITERS);
     GPIO(PORT_LED_2, OUT) &= ~BIT(PIN_LED_2);
