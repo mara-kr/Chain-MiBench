@@ -12,6 +12,8 @@
 #define NUM_VALS 8
 #define SEED 4
 
+uint8_t usrBank[USRBANK_SIZE];
+
 volatile unsigned work_x;
 static void burn(uint32_t iters) {
     uint32_t iter = iters;
@@ -52,6 +54,7 @@ TASK(4, task_end)
 
 
 void init() {
+    LOG("init");
     srand(SEED);
     /* Turn on LEDS */
     GPIO(PORT_LED_1, DIR) |= BIT(PIN_LED_1);
@@ -63,6 +66,8 @@ void init() {
     GPIO(PORT_LED_1, OUT) |= BIT(PIN_LED_1);
 
     INIT_CONSOLE();
+
+    //__enable_interrupt();
 }
 
 void pre_init() {
@@ -100,6 +105,7 @@ void task_bitcount() {
     unsigned *vals, *results;
     i = *CHAN_IN2(unsigned, index, CH(task_init, task_bitcount),
             SELF_IN_CH(task_bitcount));
+    LOG("bitcount i = %x\r\n", i);
     vals = *CHAN_IN2(unsigned *, vals, CH(task_init, task_bitcount),
             SELF_IN_CH(task_bitcount));
     results = *CHAN_IN2(unsigned *, results, CH(task_init, task_bitcount),
@@ -121,10 +127,12 @@ void task_bitcount() {
 }
 
 void task_end() {
+    LOG("End");
     GPIO(PORT_LED_2, OUT) |= BIT(PIN_LED_2);
     burn(WAIT_TICK_DURATION_ITERS);
     GPIO(PORT_LED_2, OUT) &= ~BIT(PIN_LED_2);
     burn(WAIT_TICK_DURATION_ITERS);
+    TRANSITION_TO(task_end);
 }
 
 ENTRY_TASK(pre_init)
