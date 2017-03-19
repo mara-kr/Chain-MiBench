@@ -18,21 +18,21 @@
 #define WAIT_TICK_DURATION_ITERS 300000
 
 #define SEED 2 // No guarentuee of on-board timer
-#define MAXARRAY 256 // Any larger won't fit on msp430
+#define MAXARRAY 128 // Any larger won't fit on msp430
 #define STACK_SIZE 32 // 2*ceil(log2(MAXARRAY)), upto next power 2
 
 
 typedef struct my3DVertexStruct {
     //int x, y, z;
-    double distance;
+    unsigned distance;
 } vertex_t;
 
 typedef struct stack_val {
     unsigned lo, hi;
 } stack_val_t;
 
-static int compare(const double elem1, const double elem2) {
-    double dist1, dist2;
+static int compare(const unsigned elem1, const unsigned elem2) {
+    unsigned dist1, dist2;
 
     dist1 = elem1;
     dist2 = elem2;
@@ -41,10 +41,10 @@ static int compare(const double elem1, const double elem2) {
 }
 
 // Taken from algolist.net/Algorithms/Sorting/Quicksort
-static unsigned partition(double *a, unsigned low_idx, unsigned hi_idx) {
+static unsigned partition(unsigned *a, unsigned low_idx, unsigned hi_idx) {
     unsigned i = low_idx, j = hi_idx;
-    double tmp;
-    double pivot = a[(i + j) / 2];
+    unsigned tmp;
+    unsigned pivot = a[(i + j) / 2];
 
     while (i <= j) {
         while (compare(a[i], pivot) < 0) { i++;}
@@ -67,7 +67,7 @@ TASK(6, bench_success)
 
 // The stack contains subarrays to be processed (i.e. a call stack)
 struct sort_params {
-    CHAN_FIELD_ARRAY(double, vals, MAXARRAY);
+    CHAN_FIELD_ARRAY(unsigned, vals, MAXARRAY);
     CHAN_FIELD_ARRAY(stack_val_t, stack, STACK_SIZE);
     CHAN_FIELD(unsigned, stack_idx);
 };
@@ -88,9 +88,8 @@ struct init_i {
 
 // Add array field
 struct end_vals {
-    SELF_CHAN_FIELD(unsigned, i);
-    //CHAN_FIELD_ARRAY(double, vals, MAXARRAY);
-    SELF_CHAN_FIELD_ARRAY(double, vals, MAXARRAY);
+    CHAN_FIELD(unsigned, i);
+    CHAN_FIELD_ARRAY(unsigned, vals, MAXARRAY);
 };
 
 #define FIELD_INIT_end_vals {\
@@ -113,24 +112,31 @@ static void burn(uint32_t iters) {
         work_x++;
 }
 
-// always run on reboot
 void init() {
-    srand(SEED);
+    WISP_init();
+
     /* Turn on LEDS */
     GPIO(PORT_LED_1, DIR) |= BIT(PIN_LED_1);
     GPIO(PORT_LED_2, DIR) |= BIT(PIN_LED_2);
 #if defined(PORT_LED_3)
     GPIO(PORT_LED_3, DIR) |= BIT(PIN_LED_3);
 #endif
-    // Turn on LED1 until we (maybe) fail
+    // Turn on LED1
     GPIO(PORT_LED_1, OUT) |= BIT(PIN_LED_1);
 
     INIT_CONSOLE();
+
+    __enable_interrupt();
+
+    srand(SEED);
 }
 
 void pre_init() {
+    task_prologue();
+    LOG("pre_init\r\n");
     unsigned i = 0;
     CHAN_OUT1(unsigned, i, i, CH(pre_init, task_init));
+    LOG("pre_init2\r\n");
     TRANSITION_TO(task_init);
 }
 
@@ -138,30 +144,30 @@ void pre_init() {
 void task_init() {
     task_prologue();
     LOG("init\r\n");
-    GPIO(PORT_LED_1, OUT) |= BIT(PIN_LED_1);
 
-    unsigned i;
-    i = *CHAN_IN2(unsigned, i, SELF_IN_CH(task_init),
+    unsigned i = *CHAN_IN2(unsigned, i, SELF_IN_CH(task_init),
             CH(pre_init, task_init));
 
-    double vals[MAXARRAY];
+    unsigned val;
     for ( ; i < MAXARRAY; i++) {
-        vals[i] = (double) rand();
+        val = (unsigned) rand();
         CHAN_OUT1(unsigned, i, i, SELF_OUT_CH(task_init));
+        CHAN_OUT1(unsigned, vals[i], val,
+                CH(task_init, task_sort));
+        LOG("%u:%f\r\n", i, val);
     }
 
     // Set stack idx to 0xFFFF - need a default value
     unsigned stack_i = (unsigned) -1;
     CHAN_OUT1(unsigned, stack_idx, stack_i,
             CH(task_init, task_sort));
-    CHAN_OUT1(double *, vals, vals,
-            CH(task_init, task_sort));
     TRANSITION_TO(task_sort);
 }
 
 void task_sort() {
     task_prologue();
-    double *vals;
+    LOG("sort\r\n");
+    unsigned *vals;
     stack_val_t *stack;
     stack_val_t stack_val;
     unsigned stack_i, i;
@@ -170,7 +176,7 @@ void task_sort() {
             CH(task_init, task_sort), SELF_IN_CH(task_sort));
     stack = *CHAN_IN2(stack_val_t *, stack,
         CH(task_init, task_sort), SELF_IN_CH(task_sort));
-    vals = *CHAN_IN2(double *, vals,
+    vals = *CHAN_IN2(unsigned *, vals,
         CH(task_init, task_sort), SELF_IN_CH(task_sort));
     if (stack_i < ((unsigned) -1)) {
         stack_val = stack[stack_i];
@@ -184,7 +190,7 @@ void task_sort() {
             CHAN_OUT1(stack_val_t, stack[stack_i], stack[stack_i],
                     SELF_OUT_CH(task_sort));
 
-            CHAN_OUT1(double *, vals, vals,
+            CHAN_OUT1(unsigned *, vals, vals,
                     SELF_OUT_CH(task_sort));
             CHAN_OUT1(unsigned, stack_idx, stack_i,
                     SELF_OUT_CH(task_sort));
@@ -202,7 +208,7 @@ void task_end() {
 
     unsigned i = *CHAN_IN2(unsigned, i, SELF_IN_CH(task_end),
             CH(task_sort, task_end));
-    double *vals = *CHAN_IN2(double *, vals, SELF_IN_CH(task_end),
+    unsigned *vals = *CHAN_IN2(unsigned *, vals, SELF_IN_CH(task_end),
             CH(task_sort, task_end));
 
     for ( ; i < MAXARRAY-1; i++) {
