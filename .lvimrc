@@ -1,0 +1,18 @@
+"Chain Neomake fixes
+
+let lib_root_dir = '/home/neil/Desktop/Chain-MiBench/ext/'
+
+" Needs work, doesn't recognize libio/log.h
+let g:neomake_c_mspgcc_maker = {
+    \ 'args': [ '-std=c99', '-Wall', '-fno-builtin', '-D__MSP430FR5969__',
+    \ '-mmcu=msp430fr5969', '-DBOARD_MSP_TS430',
+    \ '-I ' . lib_root_dir . 'libchain/src/include',
+    \ '-I /home/neil/Desktop/Chain-MiBench/ext/libio/src/include',
+    \ '-I ' . lib_root_dir . 'libmsp/src/include',
+    \ '-I ' . lib_root_dir . 'libwispbase/src/include',
+    \ '-I ' . lib_root_dir . 'libedb/src/include',
+    \ '-I /opt/ti/msp430-gcc/msp430-elf/include'
+    \ ],
+    \ 'exe': 'msp430-elf-gcc'
+    \ }
+let g:neomake_c_enabled_makers = []
