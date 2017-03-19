@@ -35,7 +35,7 @@ struct bit_vals {
 }
 
 struct init_i {
-    SELF_CHAN_FIELD(unsigned, i);
+    SELF_CHAN_FIELD(unsigned, index);
 };
 
 #define FIELD_INIT_init_i {\
@@ -44,7 +44,7 @@ struct init_i {
 
 CHANNEL(pre_init, task_init, init_i);
 CHANNEL(task_init, task_bitcount, bit_vals);
-SELF_CHANNEL(task_bitcount, bit_vals);
+SELF_CHANNEL(task_bitcount, init_i);
 SELF_CHANNEL(task_init, init_i);
 
 TASK(1, pre_init)
@@ -54,8 +54,8 @@ TASK(4, task_end)
 
 
 void init() {
-    LOG("init");
-    srand(SEED);
+    WISP_init();
+
     /* Turn on LEDS */
     GPIO(PORT_LED_1, DIR) |= BIT(PIN_LED_1);
     GPIO(PORT_LED_2, DIR) |= BIT(PIN_LED_2);
@@ -67,13 +67,17 @@ void init() {
 
     INIT_CONSOLE();
 
-    //__enable_interrupt();
+    __enable_interrupt();
+
+    LOG("main.c booted\r\n");
+    srand(SEED);
 }
 
 void pre_init() {
     task_prologue();
+    LOG("pre_init");
     unsigned i = 0;
-    CHAN_OUT1(unsigned, i, i, CH(pre_init, task_init));
+    CHAN_OUT1(unsigned, index, i, CH(pre_init, task_init));
     TRANSITION_TO(task_init);
 }
 
@@ -82,7 +86,7 @@ void task_init() {
     LOG("init\r\n");
 
     unsigned i;
-    i = *CHAN_IN2(unsigned, i, SELF_IN_CH(task_init),
+    i = *CHAN_IN2(unsigned, index, SELF_IN_CH(task_init),
             CH(pre_init, task_init));
 
     unsigned vals[NUM_VALS];
@@ -90,12 +94,13 @@ void task_init() {
     for ( ; i < NUM_VALS; i++) {
         vals[i] = (unsigned) rand();
         results[i] = 0;
-        CHAN_OUT1(unsigned, i, i, SELF_OUT_CH(task_init));
+        CHAN_OUT1(unsigned, index, i, SELF_OUT_CH(task_init));
+        CHAN_OUT1(unsigned, vals[i], vals[i], CH(task_init, task_bitcount));
+        CHAN_OUT1(unsigned, results[i], vals[i], CH(task_init, task_bitcount));
+        LOG("START %x:%x, %x\r\n", i, vals[i], results[i]);
     }
     i = 0;
     CHAN_OUT1(unsigned, index, i, CH(task_init, task_bitcount));
-    CHAN_OUT1(unsigned *, vals, vals, CH(task_init, task_bitcount));
-    CHAN_OUT1(unsigned *, results, results, CH(task_init, task_bitcount));
     TRANSITION_TO(task_bitcount);
 }
 
@@ -105,29 +110,28 @@ void task_bitcount() {
     unsigned *vals, *results;
     i = *CHAN_IN2(unsigned, index, CH(task_init, task_bitcount),
             SELF_IN_CH(task_bitcount));
-    LOG("bitcount i = %x\r\n", i);
-    vals = *CHAN_IN2(unsigned *, vals, CH(task_init, task_bitcount),
-            SELF_IN_CH(task_bitcount));
-    results = *CHAN_IN2(unsigned *, results, CH(task_init, task_bitcount),
-            SELF_IN_CH(task_bitcount));
+    results = *CHAN_IN1(unsigned *, results, CH(task_init, task_bitcount));
     for ( ; i < NUM_VALS; i++) {
         count = 0;
-        val = vals[i];
+        val = *CHAN_IN1(unsigned, vals[i], CH(task_init, task_bitcount));
+        LOG("val %u=%x\r\n", i, val);
         // Do the counting
-        if (val) do
-            count++;
-        while (0 != (val = val&(val-1)));
+        if (val) {
+            do {
+                count++;
+                val = val & (val - 1);
+            } while (val);
+        }
 
         results[i] = count;
         CHAN_OUT1(unsigned, index, i, SELF_OUT_CH(task_bitcount));
-        CHAN_OUT1(unsigned *, vals, vals, SELF_OUT_CH(task_bitcount));
-        CHAN_OUT1(unsigned *, results, results, SELF_OUT_CH(task_bitcount));
+        LOG("END %x: %x\r\n", i, results[i]);
     }
     TRANSITION_TO(task_end);
 }
 
 void task_end() {
-    LOG("End");
+    //LOG("End");
     GPIO(PORT_LED_2, OUT) |= BIT(PIN_LED_2);
     burn(WAIT_TICK_DURATION_ITERS);
     GPIO(PORT_LED_2, OUT) &= ~BIT(PIN_LED_2);
