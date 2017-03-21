@@ -18,8 +18,8 @@
 #define WAIT_TICK_DURATION_ITERS 300000
 
 #define SEED 2 // No guarentuee of on-board timer
-#define MAXARRAY 128 // Any larger won't fit on msp430
-#define STACK_SIZE 32 // 2*ceil(log2(MAXARRAY)), upto next power 2
+#define MAXARRAY 4 // TODO change to 128
+#define STACK_SIZE 4 // 2*ceil(log2(MAXARRAY)), upto next power 2
 
 
 typedef struct my3DVertexStruct {
@@ -40,30 +40,13 @@ static int compare(const unsigned elem1, const unsigned elem2) {
     return (dist1 > dist2) ? 1 : ((dist1 == dist2) ? 0 : -1);
 }
 
-// Taken from algolist.net/Algorithms/Sorting/Quicksort
-static unsigned partition(unsigned *a, unsigned low_idx, unsigned hi_idx) {
-    unsigned i = low_idx, j = hi_idx;
-    unsigned tmp;
-    unsigned pivot = a[(i + j) / 2];
-
-    while (i <= j) {
-        while (compare(a[i], pivot) < 0) { i++;}
-        while (compare(a[j], pivot) > 0) { j--;}
-        if (i <= j) {
-            tmp = a[i];
-            a[i] = a[j];
-            a[j] = tmp;
-        }
-    }
-    return i;
-}
-
 TASK(1, pre_init)
 TASK(2, task_init)
 TASK(3, task_sort)
 TASK(4, task_end)
 TASK(5, bench_fail)
 TASK(6, bench_success)
+TASK(7, task_mid)
 
 // The stack contains subarrays to be processed (i.e. a call stack)
 struct sort_params {
@@ -112,6 +95,37 @@ static void burn(uint32_t iters) {
         work_x++;
 }
 
+// Taken from algolist.net/Algorithms/Sorting/Quicksort
+static unsigned partition(unsigned low_idx, unsigned hi_idx) {
+    unsigned vals[MAXARRAY];
+    for (unsigned k = low_idx; k <= hi_idx; k++) {
+        vals[k] = *CHAN_IN2(unsigned, vals[k], SELF_IN_CH(task_sort),
+                CH(task_init, task_sort));
+    }
+    unsigned i = low_idx, j = hi_idx;
+    unsigned tmp;
+    unsigned pivot = vals[(i + j) / 2];
+
+    while (i <= j) {
+        while (compare(vals[i], pivot) < 0) { i++;}
+        while (compare(vals[j], pivot) > 0) { j--;}
+        if (i <= j) {
+            tmp = vals[i];
+            vals[i] = vals[j];
+            vals[j] = tmp;
+            i++;
+            j++;
+        }
+    }
+    for (unsigned k = low_idx; k <= hi_idx; k++) {
+        CHAN_OUT1(unsigned, vals[k], vals[k], SELF_OUT_CH(task_sort));
+        LOG("vals[%u] = %u\r\n", k, vals[k]);
+    }
+    return i;
+}
+
+
+
 void init() {
     WISP_init();
 
@@ -154,53 +168,67 @@ void task_init() {
         CHAN_OUT1(unsigned, i, i, SELF_OUT_CH(task_init));
         CHAN_OUT1(unsigned, vals[i], val,
                 CH(task_init, task_sort));
-        LOG("%u:%f\r\n", i, val);
+        LOG("%u:%u\r\n", i, val);
     }
 
     // Set stack idx to 0xFFFF - need a default value
-    unsigned stack_i = (unsigned) -1;
+    unsigned stack_i = 0;
+    stack_val_t stack_val;
+    stack_val.lo = 0;
+    stack_val.hi = MAXARRAY - 1;
     CHAN_OUT1(unsigned, stack_idx, stack_i,
             CH(task_init, task_sort));
+    CHAN_OUT1(stack_val_t, stack[0], stack_val, CH(task_init, task_sort));
     TRANSITION_TO(task_sort);
 }
 
 void task_sort() {
     task_prologue();
-    LOG("sort\r\n");
-    unsigned *vals;
-    stack_val_t *stack;
-    stack_val_t stack_val;
+    LOG("star2\r\n");
+    stack_val_t stack_val, new_val;
     unsigned stack_i, i;
 
     stack_i = *CHAN_IN2(unsigned, stack_idx,
             CH(task_init, task_sort), SELF_IN_CH(task_sort));
-    stack = *CHAN_IN2(stack_val_t *, stack,
+    stack_val = *CHAN_IN2(stack_val_t, stack[stack_i],
         CH(task_init, task_sort), SELF_IN_CH(task_sort));
-    vals = *CHAN_IN2(unsigned *, vals,
-        CH(task_init, task_sort), SELF_IN_CH(task_sort));
-    if (stack_i < ((unsigned) -1)) {
-        stack_val = stack[stack_i];
-        if (stack_val.lo < stack_val.hi) {
-            i = partition(vals, stack_val.lo, stack_val.hi);
-            stack[stack_i] = (stack_val_t) {.lo = stack_val.lo, .hi = i-1};
-            CHAN_OUT1(stack_val_t, stack[stack_i], stack[stack_i],
-                    SELF_OUT_CH(task_sort));
-            stack_i++;
-            stack[stack_i] = (stack_val_t) {.lo = i, .hi = stack_val.hi};
-            CHAN_OUT1(stack_val_t, stack[stack_i], stack[stack_i],
-                    SELF_OUT_CH(task_sort));
-
-            CHAN_OUT1(unsigned *, vals, vals,
-                    SELF_OUT_CH(task_sort));
-            CHAN_OUT1(unsigned, stack_idx, stack_i,
-                    SELF_OUT_CH(task_sort));
-            TRANSITION_TO(task_sort);
-        }
+    // NOTE: Chain array symantics are pretty bad
+    LOG("sort: stacki=%u, lo = %u, hi = %u\r\n",
+            stack_i, stack_val.lo, stack_val.hi);
+    if (stack_i < ((unsigned) -1) && (stack_val.lo < stack_val.hi)) {
+            i = partition(stack_val.lo, stack_val.hi);
+            LOG("i = %u\r\n", i);
+            if (stack_val.lo < i - 1) {
+                LOG("Adding to stack lo\r\n");
+                new_val.lo = stack_val.lo;
+                new_val.hi = i - 1;
+                CHAN_OUT1(stack_val_t, stack[stack_i], new_val,
+                        SELF_OUT_CH(task_sort));
+            }
+            if (i < stack_val.hi) {
+                LOG("Adding to stack hi\r\n");
+                if (stack_val.lo < i -1) { stack_i++;}
+                new_val.lo = i;
+                new_val.hi = stack_val.hi;
+                CHAN_OUT1(stack_val_t, stack[stack_i], new_val,
+                        SELF_OUT_CH(task_sort));
+            }
+            LOG("Done1\r\n");
+            CHAN_OUT1(unsigned, stack_idx, stack_i, SELF_OUT_CH(task_sort));
+            LOG("Done2\r\n");
+            TRANSITION_TO(task_mid);
+            LOG("Done3\r\n");
     } else {
         unsigned int end_i = 0;
         CHAN_OUT1(unsigned, i, end_i, CH(task_sort, task_end));
         TRANSITION_TO(task_end);
     }
+}
+
+void task_mid() {
+    task_prologue();
+    LOG("mid\r\n");
+    TRANSITION_TO(task_sort);
 }
 
 void task_end() {
