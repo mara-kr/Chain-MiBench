@@ -11,7 +11,7 @@
 #define TASK_NAME_SIZE 32
 #define CHAN_NAME_SIZE 32
 
-#define MAX_DIRTY_SELF_FIELDS 4
+#define MAX_DIRTY_SELF_FIELDS 8
 
 typedef void (task_func_t)(void);
 typedef unsigned chain_time_t;

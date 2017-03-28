@@ -46,7 +46,6 @@ TASK(3, task_sort)
 TASK(4, task_end)
 TASK(5, bench_fail)
 TASK(6, bench_success)
-TASK(7, task_mid)
 
 // The stack contains subarrays to be processed (i.e. a call stack)
 struct sort_params {
@@ -119,7 +118,10 @@ static unsigned partition(unsigned low_idx, unsigned hi_idx) {
     }
     for (unsigned k = low_idx; k <= hi_idx; k++) {
         CHAN_OUT1(unsigned, vals[k], vals[k], SELF_OUT_CH(task_sort));
-        LOG("vals[%u] = %u\r\n", k, vals[k]);
+        if (i <= MAXARRAY) {
+        //TODO caused lots of printing garbage
+            LOG("vals[%u] = %u\r\n", k, vals[k]);
+        }
     }
     return i;
 }
@@ -147,17 +149,15 @@ void init() {
 
 void pre_init() {
     task_prologue();
-    LOG("pre_init\r\n");
     unsigned i = 0;
     CHAN_OUT1(unsigned, i, i, CH(pre_init, task_init));
-    LOG("pre_init2\r\n");
     TRANSITION_TO(task_init);
 }
 
 // Assemble array, transition to task_sort
 void task_init() {
     task_prologue();
-    LOG("init\r\n");
+    LOG("\r\ninit\r\n");
 
     unsigned i = *CHAN_IN2(unsigned, i, SELF_IN_CH(task_init),
             CH(pre_init, task_init));
@@ -184,9 +184,13 @@ void task_init() {
 
 void task_sort() {
     task_prologue();
-    LOG("star2\r\n");
     stack_val_t stack_val, new_val;
     unsigned stack_i, i;
+    for (i = 0; i < MAXARRAY; i++) {
+        LOG("sort: vals[%u] = %u\r\n", i, *CHAN_IN2(unsigned, vals[i], SELF_IN_CH(task_sort),
+                CH(task_init, task_sort)));
+    }
+
 
     stack_i = *CHAN_IN2(unsigned, stack_idx,
             CH(task_init, task_sort), SELF_IN_CH(task_sort));
@@ -207,28 +211,22 @@ void task_sort() {
             }
             if (i < stack_val.hi) {
                 LOG("Adding to stack hi\r\n");
-                if (stack_val.lo < i -1) { stack_i++;}
+                if (stack_val.lo < i -1) {
+                    stack_i++;
+                    CHAN_OUT1(unsigned, stack_idx, stack_i,
+                            SELF_OUT_CH(task_sort));
+                }
                 new_val.lo = i;
                 new_val.hi = stack_val.hi;
                 CHAN_OUT1(stack_val_t, stack[stack_i], new_val,
                         SELF_OUT_CH(task_sort));
             }
-            LOG("Done1\r\n");
-            CHAN_OUT1(unsigned, stack_idx, stack_i, SELF_OUT_CH(task_sort));
-            LOG("Done2\r\n");
-            TRANSITION_TO(task_mid);
-            LOG("Done3\r\n");
+            TRANSITION_TO(task_sort);
     } else {
         unsigned int end_i = 0;
         CHAN_OUT1(unsigned, i, end_i, CH(task_sort, task_end));
         TRANSITION_TO(task_end);
     }
-}
-
-void task_mid() {
-    task_prologue();
-    LOG("mid\r\n");
-    TRANSITION_TO(task_sort);
 }
 
 void task_end() {
