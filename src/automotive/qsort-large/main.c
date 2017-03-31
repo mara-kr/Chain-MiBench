@@ -18,8 +18,8 @@
 #define WAIT_TICK_DURATION_ITERS 300000
 
 #define SEED 2 // No guarentuee of on-board timer
-#define MAXARRAY 4 // TODO change to 128
-#define STACK_SIZE 4 // 2*ceil(log2(MAXARRAY)), upto next power 2
+#define MAXARRAY 8 // TODO change to 128
+#define STACK_SIZE 8 // 2*ceil(log2(MAXARRAY)), upto next power 2
 
 
 typedef struct my3DVertexStruct {
@@ -49,9 +49,9 @@ TASK(6, bench_success)
 
 // The stack contains subarrays to be processed (i.e. a call stack)
 struct sort_params {
-    CHAN_FIELD_ARRAY(unsigned, vals, MAXARRAY);
-    CHAN_FIELD_ARRAY(stack_val_t, stack, STACK_SIZE);
-    CHAN_FIELD(unsigned, stack_idx);
+    SELF_CHAN_FIELD_ARRAY(unsigned, vals, MAXARRAY);
+    SELF_CHAN_FIELD_ARRAY(stack_val_t, stack, STACK_SIZE);
+    SELF_CHAN_FIELD(unsigned, stack_idx);
 };
 
 #define FIELD_INIT_sort_params {\
@@ -70,8 +70,8 @@ struct init_i {
 
 // Add array field
 struct end_vals {
-    CHAN_FIELD(unsigned, i);
-    CHAN_FIELD_ARRAY(unsigned, vals, MAXARRAY);
+    SELF_CHAN_FIELD(unsigned, i);
+    SELF_CHAN_FIELD_ARRAY(unsigned, vals, MAXARRAY);
 };
 
 #define FIELD_INIT_end_vals {\
@@ -96,6 +96,7 @@ static void burn(uint32_t iters) {
 
 // Taken from algolist.net/Algorithms/Sorting/Quicksort
 static unsigned partition(unsigned low_idx, unsigned hi_idx) {
+    LOG("Partition\r\n");
     unsigned vals[MAXARRAY];
     for (unsigned k = low_idx; k <= hi_idx; k++) {
         vals[k] = *CHAN_IN2(unsigned, vals[k], SELF_IN_CH(task_sort),
@@ -183,13 +184,11 @@ void task_init() {
 }
 
 void task_sort() {
-    task_prologue();
     stack_val_t stack_val, new_val;
+    task_prologue();
     unsigned stack_i, i;
-    for (i = 0; i < MAXARRAY; i++) {
-        LOG("sort: vals[%u] = %u\r\n", i, *CHAN_IN2(unsigned, vals[i], SELF_IN_CH(task_sort),
-                CH(task_init, task_sort)));
-    }
+    // How much the stack index will change by
+    int d_stacki = 0;
 
 
     stack_i = *CHAN_IN2(unsigned, stack_idx,
@@ -203,63 +202,77 @@ void task_sort() {
             i = partition(stack_val.lo, stack_val.hi);
             LOG("i = %u\r\n", i);
             if (stack_val.lo < i - 1) {
-                LOG("Adding to stack lo\r\n");
+                LOG("Adding to stack lo: %u:%u\r\n", stack_val.lo, i-1);
                 new_val.lo = stack_val.lo;
                 new_val.hi = i - 1;
-                CHAN_OUT1(stack_val_t, stack[stack_i], new_val,
-                        SELF_OUT_CH(task_sort));
+                CHAN_OUT1(stack_val_t, stack[stack_i + d_stacki],
+                        new_val, SELF_OUT_CH(task_sort));
+                d_stacki++;
             }
             if (i < stack_val.hi) {
-                LOG("Adding to stack hi\r\n");
-                if (stack_val.lo < i -1) {
-                    stack_i++;
-                    CHAN_OUT1(unsigned, stack_idx, stack_i,
-                            SELF_OUT_CH(task_sort));
-                }
+                LOG("Adding to stack hi: %u:%u\r\n", i, stack_val.hi);
                 new_val.lo = i;
                 new_val.hi = stack_val.hi;
-                CHAN_OUT1(stack_val_t, stack[stack_i], new_val,
-                        SELF_OUT_CH(task_sort));
+                CHAN_OUT1(stack_val_t, stack[stack_i + d_stacki],
+                        new_val, SELF_OUT_CH(task_sort));
+                d_stacki++;
             }
+            stack_i += d_stacki - 1; // -1 since we used up the current idx
+            LOG("Transition_to task_sort - stack_i = %u\r\n", stack_i);
+            CHAN_OUT1(unsigned, stack_idx, stack_i,
+                    SELF_OUT_CH(task_sort));
             TRANSITION_TO(task_sort);
     } else {
+        LOG("Done sorting - transitioning to task_end\r\n");
         unsigned int end_i = 0;
         CHAN_OUT1(unsigned, i, end_i, CH(task_sort, task_end));
+        unsigned val;
+        for (unsigned i = 0; i < MAXARRAY; i++) {
+            val = *CHAN_IN2(unsigned, vals[i], CH(task_init, task_sort),
+                    SELF_IN_CH(task_sort));
+            CHAN_OUT1(unsigned, vals[i], val, CH(task_sort, task_end));
+        }
         TRANSITION_TO(task_end);
     }
 }
 
 void task_end() {
     task_prologue();
+    unsigned vals[MAXARRAY];
 
     unsigned i = *CHAN_IN2(unsigned, i, SELF_IN_CH(task_end),
             CH(task_sort, task_end));
-    unsigned *vals = *CHAN_IN2(unsigned *, vals, SELF_IN_CH(task_end),
-            CH(task_sort, task_end));
-
+    vals[i] = *CHAN_IN1(unsigned, vals[i], CH(task_sort, task_end));
     for ( ; i < MAXARRAY-1; i++) {
         CHAN_OUT1(unsigned, i, i, SELF_OUT_CH(task_end));
+        vals[i+1] = *CHAN_IN1(unsigned, vals[i], CH(task_sort, task_end));
         if (compare(vals[i+1],vals[i]) < 0) {
+            LOG("Failed to sort correctly\r\n");
             TRANSITION_TO(bench_fail);
         }
     }
+    LOG("success\r\n");
     TRANSITION_TO(bench_success);
 }
 
 // Blink LED1 on failure
 void bench_fail() {
+    task_prologue();
     GPIO(PORT_LED_1, OUT) |= BIT(PIN_LED_1);
     burn(WAIT_TICK_DURATION_ITERS);
     GPIO(PORT_LED_1, OUT) &= ~BIT(PIN_LED_1);
     burn(WAIT_TICK_DURATION_ITERS);
+    TRANSITION_TO(bench_fail);
 }
 
 // Blink LED2 on success
 void bench_success() {
+    task_prologue();
     GPIO(PORT_LED_2, OUT) |= BIT(PIN_LED_2);
     burn(WAIT_TICK_DURATION_ITERS);
     GPIO(PORT_LED_2, OUT) &= ~BIT(PIN_LED_2);
     burn(WAIT_TICK_DURATION_ITERS);
+    TRANSITION_TO(bench_success);
 }
 
 ENTRY_TASK(pre_init)

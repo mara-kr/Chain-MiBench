@@ -28,12 +28,6 @@ struct bit_vals {
     CHAN_FIELD(unsigned, index);
 };
 
-#define FIELD_INIT_bit_vals {\
-    SELF_FIELD_ARRAY_INITIALIZER(NUM_VALS),\
-    SELF_FIELD_ARRAY_INITIALIZER(NUM_VALS),\
-    SELF_FIELD_INITIALIZER\
-}
-
 struct init_i {
     SELF_CHAN_FIELD(unsigned, index);
 };
